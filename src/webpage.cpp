@@ -31,6 +31,7 @@
 #include "webpage.h"
 
 #include <math.h>
+#include <iostream>
 
 #include <QApplication>
 #include <QDesktopServices>
@@ -856,6 +857,28 @@ QString WebPage::renderBase64(const QByteArray &format)
 
     // Return an empty string in case an unsupported format was provided
     return "";
+}
+
+void WebPage::renderStdout(const QByteArray &format)
+{
+    QByteArray nformat = format.toLower();
+
+    // Check if the given format is supported
+    if (QImageWriter::supportedImageFormats().contains(nformat)) {
+        QImage rawPageRendering = renderImage();
+
+        // Prepare buffer for writing
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+
+        // Writing image to the buffer, using PNG encoding
+        rawPageRendering.save(&buffer, nformat);
+
+        std::cout.write(bytes.data(), bytes.size());
+    }
+
+    return;
 }
 
 QImage WebPage::renderImage()
