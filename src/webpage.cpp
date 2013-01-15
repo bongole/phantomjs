@@ -54,6 +54,7 @@
 #include <QBuffer>
 #include <QDebug>
 #include <QImageWriter>
+#include <QUuid>
 
 #include <gifwriter.h>
 
@@ -64,6 +65,7 @@
 #include "consts.h"
 #include "callback.h"
 #include "cookiejar.h"
+#include "system.h"
 
 // Ensure we have at least head and body.
 #define BLANK_HTML                      "<html><head></head><body></body></html>"
@@ -815,24 +817,85 @@ void WebPage::close() {
     deleteLater();
 }
 
-bool WebPage::render(const QString &fileName)
+bool WebPage::render(const QString &fileName, const QVariantMap &option)
 {
     if (m_mainFrame->contentsSize().isEmpty())
         return false;
 
-    QFileInfo fileInfo(fileName);
-    QDir dir;
-    dir.mkpath(fileInfo.absolutePath());
+    QString outFileName = fileName;
+    QString tempFileName = "";
 
-    if (fileName.endsWith(".pdf", Qt::CaseInsensitive))
-        return renderPdf(fileName);
+    QString format = "";
+    int quality = -1; // QImage#save default
 
-    QImage buffer = renderImage();
-    if (fileName.toLower().endsWith(".gif")) {
-        return exportGif(buffer, fileName);
+    if( fileName == "/dev/stdout" || fileName == "/dev/stderr"){
+        if( !QFile::exists(fileName) ){
+            // create tmporary file for OS that have no /dev/stdout or /dev/stderr. (e.g. windows)
+            tempFileName = QDir::tempPath() + "/phantomjstemp" + QUuid::createUuid().toString();
+            outFileName = tempFileName;
+        }
+
+        format = "png"; // default format for stdout and stderr
+    }
+    else{
+        QFileInfo fileInfo(outFileName);
+        QDir dir;
+        dir.mkpath(fileInfo.absolutePath());
     }
 
-    return buffer.save(fileName);
+    if( option.contains("format") ){
+        format = option.value("format").toString();
+    }
+    else if (fileName.endsWith(".pdf", Qt::CaseInsensitive) ){
+        format = "pdf";
+    }
+    else if (fileName.endsWith(".gif", Qt::CaseInsensitive) ){
+        format = "gif";
+    }
+
+    if( option.contains("quality") ){
+        quality = option.value("quality").toInt();
+    }
+
+    bool retval = true;
+    if ( format == "pdf" ){
+        retval = renderPdf(outFileName);
+    }
+    else if ( format == "gif" ) {
+        QImage rawPageRendering = renderImage();
+        retval = exportGif(rawPageRendering, outFileName);
+    }
+    else{
+        QImage rawPageRendering = renderImage();
+
+        const char *f = 0; // 0 is QImage#save default
+        if( format != "" ){
+            f = format.toUtf8().constData();
+        }
+
+        retval = rawPageRendering.save(outFileName, f, quality);
+    }
+
+    if( tempFileName != "" ){
+        // cleanup tmporary file and render to stdout or stderr 
+        QFile i(tempFileName);
+
+        i.open(QIODevice::ReadOnly);
+
+        System *system = (System*)Phantom::instance()->createSystem();
+        if( fileName == "/dev/stdout" ){
+            ((QFile *)system->_stdout())->write(i.readAll());
+        }
+        else if( fileName == "/dev/stderr" ){
+            ((QFile *)system->_stderr())->write(i.readAll());
+        }
+
+        i.close();
+
+        QFile::remove(tempFileName);
+    }
+
+    return retval;
 }
 
 QString WebPage::renderBase64(const QByteArray &format)
